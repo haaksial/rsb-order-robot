@@ -4,10 +4,15 @@ Documentation     Orders robots from RobotSpareBin Industries Inc.
 ...               Saves the screenshot of the ordered robot.
 ...               Embeds the screenshot of the robot to the PDF receipt.
 ...               Creates ZIP archive of the receipts and the images.
+...               csv can be downloaded from: https://robotsparebinindustries.com/orders.csv
 Library           RPA.Browser.Selenium    auto_close=${FALSE}
 Library           RPA.HTTP
 Library           RPA.Tables
 Library           RPA.PDF
+Library           RPA.FileSystem
+Library           RPA.Archive
+Library           RPA.Dialogs
+Library           RPA.Robocorp.Vault
 
 *** Variables ***
 ${GLOBAL_RETRY_AMOUNT}=    5x
@@ -15,8 +20,9 @@ ${GLOBAL_RETRY_INTERVAL}=    0.5s
 
 *** Tasks ***
 Order robots from RobotSpareBin Industries Inc
+    ${download_url}=    Ask orders URL from user
     Open the robot order website
-    ${orders}=    Get orders
+    ${orders}=    Get orders    ${download_url}
     FOR    ${row}    IN    @{orders}
         Close pop-up
         Fill the form    ${row}
@@ -25,16 +31,20 @@ Order robots from RobotSpareBin Industries Inc
         ${pdf}=    Store the receipt as a PDF file    ${row}[Order number]
         ${screenshot}=    Take a screenshot of the robot    ${row}[Order number]
         Embed the robot screenshot to the receipt PDF file    ${screenshot}    ${pdf}
-        #    Go to order another robot
+        Go to order another robot
     END
-    # Create a ZIP file of the receipts
+    Create a ZIP file of the receipts
+    [Teardown]    Close browser
 
 *** Keywords ***
 Open the robot order website
-    Open Available Browser    https://robotsparebinindustries.com/#/robot-order    #set this url in local vault
+    ${secret}=    Get Secret    urls
+    Log    ${secret}[orderpage]
+    Open Available Browser    ${secret}[orderpage]
 
 Get orders
-    Download    https://robotsparebinindustries.com/orders.csv    overwrite=True    #set this url in local vault
+    [Arguments]    ${download_url}
+    Download    ${download_url}    overwrite=True
     ${orders}=    Read table from CSV    orders.csv    headers:True
     [Return]    ${orders}
 
@@ -58,18 +68,30 @@ Submit the order
 Store the receipt as a PDF file
     [Arguments]    ${Order number}
     Wait Until Element Is Visible    receipt
-    ${receipt}=    Get Element Attribute    receipt    outerHTML
-    Html To Pdf    ${receipt}    ${OUTPUT_DIR}${/}order_nro_${Order number}.pdf
-    ${pdf}=    Set Variable    ${OUTPUT_DIR}${/}order_nro_${Order number}.pdf
-    [Return]    ${pdf}
+    ${receipt}=    Get Element Attribute    id:receipt    outerHTML
+    Html To Pdf    ${receipt}    temp${/}order_nro_${Order number}.pdf
+    [Return]    temp${/}order_nro_${Order number}.pdf
 
 Take a screenshot of the robot
     [Arguments]    ${Order number}
-    [Return]    ${screenshot}=    Screenshot    robot-preview-image    ${OUTPUT_DIR}${/}order_preview_${Order number}.png
+    Screenshot    robot-preview-image    ${OUTPUT_DIR}${/}order_preview.png
+    [Return]    ${OUTPUT_DIR}${/}order_preview.png
 
 Embed the robot screenshot to the receipt PDF file
     [Arguments]    ${screenshot}    ${pdf}
+    ${files}=    Create List    ${screenshot}
     Open Pdf    ${pdf}
-    Add Files To Pdf    ${screenshot}
-    Save Pdf    ${pdf}
-    Close Pdf
+    Add Files To Pdf    ${files}    ${pdf}    append:True
+    Close Pdf    ${pdf}
+
+Go to order another robot
+    Click Button    order-another
+
+Create a ZIP file of the receipts
+    ${zipfile}=    Set Variable    ${OUTPUT_DIR}/receipt_archive.zip
+    Archive Folder With Zip    ${CURDIR}${/}/temp    ${zipfile}
+
+Ask orders URL from user
+    Add text input    url    label=orders.csv location    placeholder=Enter URL where to download orders.csv
+    ${result}=    Run dialog
+    [Return]    ${result.url}
